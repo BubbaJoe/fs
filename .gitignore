@@ -1,0 +1,10 @@
+.DS_Store
+.vscode/
+
+
+### Other ###
+fs
+*.fs
+./tmp/*
+.testdata/*
+!.testdata/*.fs
