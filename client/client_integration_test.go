@@ -32,11 +32,8 @@ func TestIntegrationPositive_DeleteFile(t *testing.T) {
 		},
 	)
 
-	resp, err := conf.DeleteFile(fileName)
+	err = conf.DeleteFile(fileName)
 	assert.NoError(t, err, "No error expected")
-
-	assert.True(t, resp.Success, "Expected success")
-	assert.NoError(t, err, "Expected no error")
 
 	assert.Equal(t, 1, httpmock.GetTotalCallCount(),
 		"expected %d calls", 1)
@@ -65,11 +62,8 @@ func TestIntegration_UploadFile(t *testing.T) {
 		},
 	)
 
-	resp, err := conf.DeleteFile(fileName)
+	err = conf.DeleteFile(fileName)
 	assert.NoError(t, err, "No error expected")
-
-	assert.True(t, resp.Success, "Expected success")
-	assert.NoError(t, err, "Expected no error")
 
 	assert.Equal(t, 1, httpmock.GetTotalCallCount(),
 		"expected %d calls", 1)

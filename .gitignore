@@ -1,10 +1,12 @@
 .DS_Store
 .vscode/
-
+dist/
+bin/
 
 ### Other ###
-fs
+fs-store
 *.fs
 ./tmp/*
 .testdata/*
 !.testdata/*.fs
+Dockerfile

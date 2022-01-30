@@ -1,10 +1,7 @@
-/*
-Copyright © 2022 Joe Williams <joewilliamsis@live.com>
-
-*/
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"fs-store/client"
 	"strings"
@@ -15,18 +12,23 @@ import (
 // listFilesCmd represents the listFile command
 var listFilesCmd = &cobra.Command{
 	Use:   "list",
-	Short: "A brief description of your command",
-	Long:  `A lon`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Short: "list files on the server",
+	RunE: func(cmd *cobra.Command, args []string) error {
 		serverUrl := cmd.Flag("url").Value.String()
-		client, err := client.NewFSClientConfig(serverUrl, false)
+		verbose, err := cmd.Flags().GetBool("verbose")
 		if err != nil {
-			fmt.Println(err)
+			return err
+		}
+		client, err := client.NewFSClientConfig(serverUrl, verbose)
+		if err != nil {
+			return err
 		}
 
 		files, err := client.ListFiles()
 		if err != nil {
-			fmt.Println(err)
+			return err
+		} else if files == nil {
+			return errors.New("could fetch files from server")
 		}
 
 		// Print the files
@@ -38,19 +40,14 @@ var listFilesCmd = &cobra.Command{
 				fileNames = append(fileNames, file.FileName)
 			}
 			fmt.Println(strings.Join(fileNames, ", "))
-
 		} else {
 			fmt.Println("No Files Found")
 		}
+		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(listFilesCmd)
-
-	// Server URL
-	listFilesCmd.Flags().StringP("url", "u", "http://localhost:8080", "url for connecting to the server")
-
-	// Verbose
-	listFilesCmd.Flags().BoolP("verbose", "v", false, "verbose output")
+	setupCommonClientFlags(listFilesCmd)
 }

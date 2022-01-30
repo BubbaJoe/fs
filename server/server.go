@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/sirupsen/logrus"
 )
 
 // ServerConfig is the configuration for server properties
@@ -31,37 +32,76 @@ type ServerConfig struct {
 var (
 	// ErrFileAlreadyExists is returned when a file already exists
 	ErrFileAlreadyExists = errors.New("file already exists")
+
+	// ErrFileDoesntExist is returned when a file doesn't exists
+	ErrFileDoesntExist = errors.New("file doesn't exist")
 )
 
-func NewServerConfig(address, dataDir string, maxFileSize int64, maxListSize int, makeDir bool) (*ServerConfig, error) {
-	if makeDir {
-		err := os.MkdirAll(dataDir, os.ModePerm)
-		if err != nil {
-			return nil, err
-		}
+func NewServerConfig(address, dataDir string, maxFileSize int64, logLevel string) (*ServerConfig, error) {
+	err := os.MkdirAll(dataDir, os.ModePerm)
+	if err != nil {
+		return nil, err
 	}
+
+	level, err := logrus.ParseLevel(logLevel)
+	if err != nil {
+		return nil, err
+	}
+	logrus.SetLevel(level)
+
+	logrus.SetFormatter(&logrus.TextFormatter{
+		DisableColors: true,
+	})
+
+	logrus.WithFields(logrus.Fields{
+		"address":     address,
+		"dataDir":     dataDir,
+		"maxFileSize": maxFileSize,
+		"logLevel":    logLevel,
+	}).Info("Creating server config")
 
 	return &ServerConfig{
 		DataDir:     dataDir,
 		Address:     address,
 		MaxFileSize: maxFileSize,
-		MaxListSize: maxListSize,
-		mapLock:     new(sync.RWMutex),
-		mtxMap:      make(map[string]*sync.Mutex, maxListSize),
+		MaxListSize: 255,
+		mapLock:     &sync.RWMutex{},
+		mtxMap:      make(map[string]*sync.Mutex, 255),
 	}, nil
 }
 
 func (sc *ServerConfig) StartServer() error {
 	e := echo.New()
 
+	logrus.Info("Starting server at ", sc.Address)
+
 	// Hide initial messages
 	e.HideBanner = true
 	e.HidePort = true
-	e.Logger.SetHeader("${time_rfc3339} ${remote_ip} ${method} ${uri} ${status} ${latency_human}")
 
 	// Middleware
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Format: "method=${method}, uri=${uri}, status=${status}, error={${error}}\n",
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogURI:       true,
+		LogRemoteIP:  true,
+		LogMethod:    true,
+		LogLatency:   true,
+		LogStatus:    true,
+		LogUserAgent: true,
+		LogError:     true,
+		LogValuesFunc: func(c echo.Context, values middleware.RequestLoggerValues) error {
+			fields := logrus.Fields{
+				"url":       values.URI,
+				"status":    values.Status,
+				"method":    values.Method,
+				"latency":   values.Latency,
+				"ip":        values.RemoteIP,
+				"userAgent": values.UserAgent,
+			}
+			logrus.WithFields(fields).
+				Info("request")
+
+			return nil
+		},
 	}))
 	// e.Use(middleware.Recover())
 
@@ -89,38 +129,20 @@ func (sc *ServerConfig) acquireLock(keyName string) *sync.Mutex {
 		// acquire lock, then check if mutex exists again (double-checked locking)
 		sc.mapLock.Lock()
 		if _, ok := sc.mtxMap[keyName]; !ok {
-			newMutex := new(sync.Mutex)
+			newMutex := &sync.Mutex{}
 			newMutex.Lock()
 			sc.mtxMap[keyName] = newMutex
 		}
 		sc.mapLock.Unlock()
 	} else {
+		sc.mapLock.RUnlock()
 		keyNameMtx.Lock()
 	}
 
 	return sc.mtxMap[keyName]
 }
 
-// removeLock removes the lock from the map, and returns the locked map lock
-func (sc *ServerConfig) removeLock(keyName string) *sync.RWMutex {
-	// Acquire read lock to check whether mutext exists
-	sc.mapLock.RLock()
-	if _, ok := sc.mtxMap[keyName]; ok {
-		// release read lock so write lock can be acquired
-		sc.mapLock.RUnlock()
-
-		// acquire lock, then check if mutex exists again (double-checked locking)
-		sc.mapLock.Lock()
-		delete(sc.mtxMap, keyName)
-
-	} else {
-		// release (map) read lock after lock is acquired
-		sc.mapLock.RUnlock()
-	}
-
-	return sc.mapLock
-}
-
+// createFile creates a file at the given path
 func (sc *ServerConfig) createFile(fileName string, size int64, data io.Reader, overwrite bool) error {
 	// create file store
 	store := &FileStore{
@@ -129,8 +151,9 @@ func (sc *ServerConfig) createFile(fileName string, size int64, data io.Reader, 
 		Reader:   data,
 		DataSize: size,
 	}
-
+	logrus.Info("acquire lock for ", fileName)
 	mutex := sc.acquireLock(fileName)
+	logrus.Info("release lock for ", fileName)
 	defer mutex.Unlock()
 	// After acquiring lock, check if file exists (double-checked locking)
 	if exists, err := fileExists(sc.DataDir, fileName); err != nil {
@@ -141,17 +164,22 @@ func (sc *ServerConfig) createFile(fileName string, size int64, data io.Reader, 
 	return store.createFileAt(sc.DataDir, overwrite)
 }
 
+// deleteFile deletes a file at the given path
 func (sc *ServerConfig) deleteFile(fileName string) error {
+	sc.mapLock.Lock()
+	delete(sc.mtxMap, fileName)
+	defer sc.mapLock.Unlock()
 
-	mapMutex := sc.removeLock(fileName)
-	defer mapMutex.Unlock()
-
-	// Create file from file store
-	err := deleteFileAt(sc.DataDir, fileName)
-	return err
+	exists, err := fileExists(sc.DataDir, fileName)
+	if err != nil {
+		return err
+	} else if exists {
+		return deleteFileAt(sc.DataDir, fileName)
+	}
+	return ErrFileDoesntExist
 }
 
-//
+// getFileList returns a list of files in the given directory
 func (sc *ServerConfig) getFileList(limit int) ([]FileResponse, error) {
 	entries, err := os.ReadDir(sc.DataDir)
 

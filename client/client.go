@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	. "fs-store/types"
@@ -14,46 +15,54 @@ import (
 
 // FSClientConfig is the configuration for the client
 type FSClientConfig struct {
-	Client *resty.Client
+	Client  *resty.Client
+	Verbose bool
 }
 
 // NewFSClientConfig creates a new client configuration
-func NewFSClientConfig(rawAddress string, secure bool) (*FSClientConfig, error) {
+func NewFSClientConfig(rawAddress string, verbose bool) (*FSClientConfig, error) {
 	if !strings.Contains(rawAddress, "://") {
-		if secure {
-			rawAddress = "https://" + rawAddress
-		} else {
-			rawAddress = "http://" + rawAddress
-		}
+		rawAddress = "http://" + rawAddress
 	}
+
 	url, err := url.Parse(rawAddress)
 	if err != nil {
 		return nil, err
 	}
 
-	client := resty.New()
+	client := resty.New().OnAfterResponse(func(c *resty.Client, r *resty.Response) error {
+		if verbose {
+			fmt.Println(r.StatusCode(), string(r.Body()))
+		}
+		return nil
+	})
 
 	address := url.Scheme + "://" + url.Host
 
 	return &FSClientConfig{
-		Client: client.SetBaseURL(address),
+		Client:  client.SetBaseURL(address),
+		Verbose: verbose,
 	}, nil
 }
 
 // DeleteFile deletes a file
-func (conf *FSClientConfig) DeleteFile(fileName string) (GenericResponse, error) {
-	trimmedFileName := strings.TrimSpace(fileName)
-	var genResponse GenericResponse
-	_, err := conf.Client.R().
+func (conf *FSClientConfig) DeleteFile(fileName string) error {
+	genResponse := &GenericResponse{}
+	resp, err := conf.Client.R().
 		SetResult(&genResponse).
-		SetQueryParam("filename", trimmedFileName).
+		SetQueryParam("filename", fileName).
 		Delete("/files")
 
 	if err != nil {
-		return genResponse, err
+		return err
+	} else if resp.IsError() {
+		err := json.Unmarshal(resp.Body(), genResponse)
+		if err != nil {
+			return errors.New("unknown error")
+		}
+		return errors.New(genResponse.Message)
 	}
-
-	return genResponse, nil
+	return nil
 }
 
 func (conf *FSClientConfig) UploadFile(fileName string, r io.Reader, overwrite bool) error {
@@ -62,13 +71,20 @@ func (conf *FSClientConfig) UploadFile(fileName string, r io.Reader, overwrite b
 
 	resp, err := req.
 		SetQueryParam("overwrite", strconv.FormatBool(overwrite)).
-		SetMultipartField("file", fileName, "", r).
+		SetMultipartField("file", fileName, "application/octet-stream", r).
 		SetResult(genResponse).
 		Post("/files")
 
-	fmt.Println(string(resp.Body()), resp.StatusCode())
-
-	return err
+	if err != nil {
+		return err
+	} else if resp.IsError() {
+		err := json.Unmarshal(resp.Body(), genResponse)
+		if err != nil {
+			return errors.New("unknown error")
+		}
+		return errors.New(genResponse.Message)
+	}
+	return nil
 }
 
 func (conf *FSClientConfig) ListFiles() ([]FileResponse, error) {
@@ -79,11 +95,14 @@ func (conf *FSClientConfig) ListFiles() ([]FileResponse, error) {
 
 	if err != nil {
 		return nil, err
+	} else if resp.IsError() {
+		genResponse := &GenericResponse{}
+		err := json.Unmarshal(resp.Body(), genResponse)
+		if err != nil {
+			return nil, errors.New("unknown error")
+		}
+		return nil, errors.New(genResponse.Message)
 	}
-
-	if resp.StatusCode() != 200 {
-		return nil, errors.New("status - " + resp.Status())
-	}
-
 	return files, nil
+
 }

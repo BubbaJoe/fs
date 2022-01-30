@@ -14,7 +14,7 @@ import (
 
 // getServerConfig returns a ServerConfig with a test data directory
 func getServerConfig(t *testing.T) *ServerConfig {
-	sc, err := NewServerConfig(":8080", "../.testdata/.tmp/", 10, 10, true)
+	sc, err := NewServerConfig(":8080", "../.testdata/.tmp/", 10, "error")
 	assert.NoError(t, err, "Error creating server config")
 	return sc
 }
@@ -85,6 +85,8 @@ func Test_AcquireLockNonExistingKey(t *testing.T) {
 		t.Errorf("Mutex not found for file %s", fileName)
 	} else {
 		if assert.True(t, IsMtxLocked(mtx), "Mutex is not locked") {
+			assert.False(t, IsMtxReadLocked(sc.mapLock), "Map Mutex is not read locked")
+			assert.False(t, IsMtxWriteLocked(sc.mapLock), "Map Mutex is not read locked")
 			mtx.Unlock()
 			assert.False(t, IsMtxLocked(mtx), "Mutex is locked")
 		}
@@ -104,6 +106,8 @@ func Test_AcquireLockExistingKey(t *testing.T) {
 		t.Errorf("Mutex not found for file %s", fileName)
 	} else {
 		if assert.True(t, IsMtxLocked(mtx), "Mutex is not locked") {
+			assert.False(t, IsMtxReadLocked(sc.mapLock), "Map Mutex is not read locked")
+			assert.False(t, IsMtxWriteLocked(sc.mapLock), "Map Mutex is not read locked")
 			mtx.Unlock()
 			assert.False(t, IsMtxLocked(mtx), "Mutex is locked")
 			assert.Equal(t, testMutex, mtx, "Mutex is not the same")

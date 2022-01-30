@@ -1,19 +1,58 @@
 # FS Store
 
-TODO:
+## Usage
 
-- Confirm no memory leak
-- json response for errors
-- integration test for errors
+```sh
+## Start server
+fs-store server [flags]
 
+## list files form server
+fs-store list <localFileName> ... [flags]
 
-## Design Choices
+## upload file to server
+fs-store upload <localFileName> ... [flags]
 
-CLI design
+## delete file from server
+fs-store delete <serverFileName> ... [flags]
+```
 
 ## Setup
 
-build
+### Build binary
 
-test
+```sh
+make build
+```
 
+### Testing
+
+```sh
+
+make test
+
+## includes test / vet / lint
+make check
+```
+
+### Docker
+
+```sh
+make docker-build
+```
+
+### Release
+
+```sh
+make release
+```
+
+
+## Scope
+
+- [ ] Cmd Test (e2e)
+- [x] Client Unit Test
+- [x] Client Integration Test
+- [ ] Server Integration Test
+- [x] Server Unit Test
+- [x] Dockerfile
+- [x] Makefile - test/vet/lint/release
